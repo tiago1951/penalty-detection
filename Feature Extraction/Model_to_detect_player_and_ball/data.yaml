@@ -1,0 +1,5 @@
+train: penalty_dataset/images/train
+val: penalty_dataset/images/val
+
+nc: 2
+names: ['striker', 'ball']

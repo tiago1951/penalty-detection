@@ -1,0 +1,16 @@
+# Ignore virtual environment folder
+penalty/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# Jupyter Notebook checkpoints
+*.ipynb_checkpoints
+
+# VS Code settings (if using)
+.vscode/
+
+# System files
+.DS_Store
+Thumbs.db

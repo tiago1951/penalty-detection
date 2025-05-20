@@ -1,0 +1,9 @@
+numpy
+opencv-python
+torch
+torchvision
+matplotlib
+scikit-learn
+pandas
+jupyter
+SoccerNet --upgrade
