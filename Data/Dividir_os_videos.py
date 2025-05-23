@@ -4,124 +4,124 @@ import numpy as np
 import glob
 from ultralytics import YOLO
 
-# Load trained model
-model = YOLO("runs/detect/train/weights/last.pt")
+# Carrega o modelo
+model = YOLO("runs/detect/train/weights/best.pt")
 
-# Settings
-VIDEO_DIR = "videos"
-BEFORE_DIR = "videos_before"
-AFTER_DIR = "videos_after"
-BALL_CLASS_ID = 0
-MOVEMENT_THRESHOLD = 20
-MIN_FRAMES_BEFORE_MOVEMENT = 20
-OVERLAP_FRAMES = 5
+# Configurações
+VIDEO_DIR                = "videos"
+BEFORE_DIR               = "videos_before"
+AFTER_DIR                = "videos_after"
+BALL_CLASS_ID            = 0
+MOVEMENT_THRESHOLD       = 30    # pixels
+MIN_FRAMES_BEFORE_MOV    = 25    # ignora até este frame
+OVERLAP_FRAMES           = 5
+FALLBACK_MISSED_FRAMES   = 11
 
+# Prepara pastas de saída
 os.makedirs(BEFORE_DIR, exist_ok=True)
 os.makedirs(AFTER_DIR, exist_ok=True)
-
-# Clean up old outputs
 for folder in [BEFORE_DIR, AFTER_DIR]:
-    for file in glob.glob(os.path.join(folder, "**", "*.mp4"), recursive=True):
-        os.remove(file)
-print("🧹 Cleared old videos from videos_before/ and videos_after/")
+    for f in glob.glob(os.path.join(folder, "**", "*.mp4"), recursive=True):
+        os.remove(f)
+print("🧹 Old outputs cleared")
 
 def detect_ball_center(results):
     for box in results.boxes:
         if int(box.cls[0]) == BALL_CLASS_ID:
             x1, y1, x2, y2 = box.xyxy[0]
-            cx = (x1 + x2) / 2
-            cy = (y1 + y2) / 2
-            return (float(cx), float(cy))
+            return ((x1 + x2)/2, (y1 + y2)/2)
     return None
 
-def process_video(input_path, rel_name, mirrored=False):
-    label = "_mirrored" if mirrored else ""
-    output_before = os.path.join(BEFORE_DIR, f"{rel_name}{label}_before.mp4")
-    output_after = os.path.join(AFTER_DIR, f"{rel_name}{label}_after.mp4")
-    os.makedirs(os.path.dirname(output_before), exist_ok=True)
-    os.makedirs(os.path.dirname(output_after), exist_ok=True)
+def process_video(path, name, mirrored=False):
+    label      = "_mirrored" if mirrored else ""
+    out_before = os.path.join(BEFORE_DIR, f"{name}{label}_before.mp4")
+    out_after  = os.path.join(AFTER_DIR,  f"{name}{label}_after.mp4")
+    os.makedirs(os.path.dirname(out_before), exist_ok=True)
+    os.makedirs(os.path.dirname(out_after),  exist_ok=True)
 
-    cap = cv2.VideoCapture(input_path)
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap    = cv2.VideoCapture(path)
+    fps    = cap.get(cv2.CAP_PROP_FPS)
+    w      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-    frames = []
+    frames    = []
     positions = []
 
+    # 1) captura frames e detecções
     while True:
         ret, frame = cap.read()
-        if not ret:
-            break
-
+        if not ret: break
         if mirrored:
             frame = cv2.flip(frame, 1)
-
         frames.append(frame)
-        results = model(frame, verbose=False)[0]
-        center = detect_ball_center(results)
-        positions.append(center)
-
+        res = model(frame, verbose=False)[0]
+        positions.append(detect_ball_center(res))
     cap.release()
 
-    split_index = len(frames)
-    last_seen = None
-    missed_frames = 0
-    movement_triggered = False
+    # 2) constrói lista de índices onde bola foi detectada
+    detected_idxs = [i for i, p in enumerate(positions) if p is not None]
 
-    for i in range(MIN_FRAMES_BEFORE_MOVEMENT, len(positions) - 1):
-        curr = positions[i]
-        nxt = positions[i + 1]
+    split_index     = len(frames)
+    movement_found  = False
+    last_seen_idx   = None
+    missed_frames   = 0
 
-        if curr and nxt:
-            dx = nxt[0] - curr[0]
-            dy = nxt[1] - curr[1]
-            dist = np.sqrt(dx**2 + dy**2)
-            if dist > MOVEMENT_THRESHOLD:
-                split_index = i
-                movement_triggered = True
-                print(f"✅ Movement detected at frame {i} (distance={dist:.2f}) {label}")
-                break
+    # 3) percorre pares de detecções consecutivas
+    for j in range(len(detected_idxs)-1):
+        i_curr = detected_idxs[j]
+        i_next = detected_idxs[j+1]
 
-        if curr:
-            last_seen = i
-            missed_frames = 0
-        else:
-            missed_frames += 1
-            if not movement_triggered and missed_frames >= 7 and last_seen is not None:
-                split_index = max(min(last_seen, len(frames) - 1), 0)
-                print(f"⚠️ Ball disappeared. Using fallback at frame {split_index} {label}")
-                break
-
-    end_before = min(split_index, len(frames))
-    start_after = max(split_index - OVERLAP_FRAMES, 0)
-
-    # Save BEFORE
-    out_before = cv2.VideoWriter(output_before, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-    for i in range(0, end_before):
-        out_before.write(frames[i])
-    out_before.release()
-
-    # Save AFTER
-    if start_after < len(frames):
-        out_after = cv2.VideoWriter(output_after, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-        for i in range(start_after, len(frames)):
-            out_after.write(frames[i])
-        out_after.release()
-
-    print(f"✅ Saved BEFORE  ➤ {output_before}")
-    print(f"✅ Saved AFTER   ➤ {output_after}")
-
-# Walk through original videos
-for root, _, files in os.walk(VIDEO_DIR):
-    for file in files:
-        if not file.endswith(".mp4"):
+        # só começa após MIN_FRAMES_BEFORE_MOV
+        if i_curr < MIN_FRAMES_BEFORE_MOV:
+            last_seen_idx = i_curr
             continue
 
-        input_path = os.path.join(root, file)
-        rel_name = os.path.splitext(os.path.relpath(input_path, VIDEO_DIR))[0]
+        # calcula distância entre detecções consecutivas
+        x1,y1 = positions[i_curr]
+        x2,y2 = positions[i_next]
+        dist = np.hypot(x2-x1, y2-y1)
 
-        # Process original and mirrored version
-        process_video(input_path, rel_name, mirrored=False)
-        #process_video(input_path, rel_name, mirrored=True)
+        if dist > MOVEMENT_THRESHOLD:
+            split_index    = i_curr
+            movement_found = True
+            print(f"✅ Movimento detectado entre frames {i_curr}→{i_next}, dist={dist:.2f} {label}")
+            break
+
+        last_seen_idx = i_curr
+
+    # 4) fallback caso a bola suma sem movimento
+    if not movement_found:
+        # conta quantos frames após a última detecção
+        missed_frames = len(frames) - 1 - last_seen_idx
+        if missed_frames >= FALLBACK_MISSED_FRAMES:
+            split_index = last_seen_idx
+            print(f"⚠️ Fallback usado no frame {split_index} {label}")
+
+    # 5) escreve vídeos com sobreposição
+    end_before  = min(split_index , len(frames))
+    start_after = max(split_index - OVERLAP_FRAMES, 0)
+
+    # BEFORE
+    w_b = cv2.VideoWriter(out_before, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w,h))
+    for f in frames[:end_before]:
+        w_b.write(f)
+    w_b.release()
+
+    # AFTER
+    w_a = cv2.VideoWriter(out_after, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w,h))
+    for f in frames[start_after:]:
+        w_a.write(f)
+    w_a.release()
+
+    print(f"✅ Saved BEFORE ➤ {out_before}")
+    print(f"✅ Saved AFTER  ➤ {out_after}")
+
+# 6) executa em todos os vídeos
+for root, _, files in os.walk(VIDEO_DIR):
+    for fn in files:
+        if not fn.lower().endswith(".mp4"): continue
+        p = os.path.join(root, fn)
+        n = os.path.splitext(os.path.relpath(p, VIDEO_DIR))[0]
+        process_video(p, n, mirrored=False)
+        # process_video(p, n, mirrored=True)
 
