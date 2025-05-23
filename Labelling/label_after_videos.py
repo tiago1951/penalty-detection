@@ -3,13 +3,15 @@ import cv2
 from ultralytics import YOLO
 
 # Load your trained model
-model = YOLO("/mnt/c/Users/rital/OneDrive/Documentos/MECD/S2/PMBA/penalty-detection/Labelling/runs/detect/train5/weights/last.pt")
+model = YOLO("runs/detect/train5/weights/last.pt")
 model.model.names = ['Post', 'Ball']
 
 
 # Input/output folders (WSL paths)
-VIDEO_DIR = "/mnt/c/Users/rital/OneDrive/Documentos/MECD/S2/PMBA/penalty-detection/Data/videos_after"
-OUTPUT_DIR = "/mnt/c/Users/rital/OneDrive/Documentos/MECD/S2/PMBA/penalty-detection/Labelling/labelled_videos3"
+VIDEO_DIR = "C:\\Users\\tiago1951\\Desktop\\Universidade\\PBMA\\Projeto\\Data\\videos_after"
+
+OUTPUT_DIR = "C:\\Users\\tiago1951\\Desktop\\Universidade\\PBMA\\Projeto\\Labelling\\videos_after_goal_lines"
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Walk through all subfolders
